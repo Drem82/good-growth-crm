@@ -12,7 +12,7 @@ type Contact = {
   phone: string | null
   organisation: string | null
   primary_category: string | null
-  secondary_category: string | null
+  secondary_categories: string[] | null
   prospecting_client: boolean | null
   lead_owner: string | null
   secondary_contacts: string | null
@@ -34,7 +34,7 @@ export default function ContactsPage() {
   const [phone, setPhone] = useState('')
   const [organisation, setOrganisation] = useState('')
   const [primaryCategory, setPrimaryCategory] = useState('')
-  const [secondaryCategory, setSecondaryCategory] = useState('')
+  const [secondaryCategories, setSecondaryCategories] = useState<string[]>([])
   const [prospectingClient, setProspectingClient] = useState(false)
   const [leadOwner, setLeadOwner] = useState('')
   const [secondaryContacts, setSecondaryContacts] = useState('')
@@ -55,7 +55,7 @@ export default function ContactsPage() {
     const { data, error } = await supabase
       .from('contacts')
       .select(
-        'id, first_name, last_name, email, phone, organisation, primary_category, secondary_category, prospecting_client, lead_owner, secondary_contacts, other_contacts, notes'
+        'id, first_name, last_name, email, phone, organisation, primary_category, secondary_categories, prospecting_client, lead_owner, secondary_contacts, other_contacts, notes'
       )
       .order('created_at', { ascending: false })
 
@@ -75,7 +75,7 @@ export default function ContactsPage() {
     setPhone('')
     setOrganisation('')
     setPrimaryCategory('')
-    setSecondaryCategory('')
+    setSecondaryCategories([])
     setProspectingClient(false)
     setLeadOwner('')
     setSecondaryContacts('')
@@ -91,13 +91,28 @@ export default function ContactsPage() {
     setPhone(contact.phone || '')
     setOrganisation(contact.organisation || '')
     setPrimaryCategory(contact.primary_category || '')
-    setSecondaryCategory(contact.secondary_category || '')
+    setSecondaryCategories(contact.secondary_categories || [])
     setProspectingClient(Boolean(contact.prospecting_client))
     setLeadOwner(contact.lead_owner || '')
     setSecondaryContacts(contact.secondary_contacts || '')
     setOtherContacts(contact.other_contacts || '')
     setNotes(contact.notes || '')
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function toggleSecondaryCategory(category: string) {
+    if (category === primaryCategory) return
+
+    if (secondaryCategories.includes(category)) {
+      setSecondaryCategories(secondaryCategories.filter((c) => c !== category))
+    } else {
+      setSecondaryCategories([...secondaryCategories, category])
+    }
+  }
+
+  function handlePrimaryCategoryChange(value: string) {
+    setPrimaryCategory(value)
+    setSecondaryCategories((prev) => prev.filter((c) => c !== value))
   }
 
   async function saveContact(e: React.FormEvent) {
@@ -111,7 +126,7 @@ export default function ContactsPage() {
       organisation,
       full_name: `${firstName} ${lastName}`.trim(),
       primary_category: primaryCategory || null,
-      secondary_category: secondaryCategory || null,
+      secondary_categories: secondaryCategories,
       prospecting_client: prospectingClient,
       lead_owner: leadOwner || null,
       secondary_contacts: secondaryContacts,
@@ -160,6 +175,15 @@ export default function ContactsPage() {
     fetchContacts()
   }
 
+  function normalizeSecondaryCategories(value: unknown): string[] {
+    if (!value) return []
+
+    return String(value)
+      .split(/[;,]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
   async function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -184,6 +208,7 @@ export default function ContactsPage() {
           ).trim()
 
           const email = String(row['Email'] || row['email'] || '').trim()
+
           const phone = String(
             row['Phone'] || row['phone'] || row['Phone Number'] || ''
           ).trim()
@@ -203,12 +228,14 @@ export default function ContactsPage() {
               ''
           ).trim()
 
-          const secondary_category = String(
-            row['Secondary Category'] ||
+          const secondary_categories = normalizeSecondaryCategories(
+            row['Secondary Categories'] ||
+              row['secondary_categories'] ||
+              row['SecondaryCategories'] ||
+              row['Secondary Category'] ||
               row['secondary_category'] ||
-              row['SecondaryCategory'] ||
               ''
-          ).trim()
+          ).filter((c) => c !== primary_category)
 
           const prospectValue =
             row['Prospecting Client'] ||
@@ -245,7 +272,7 @@ export default function ContactsPage() {
             phone,
             organisation,
             primary_category: primary_category || null,
-            secondary_category: secondary_category || null,
+            secondary_categories,
             prospecting_client,
             lead_owner: lead_owner || null,
             secondary_contacts,
@@ -287,7 +314,7 @@ export default function ContactsPage() {
       Phone: contact.phone || '',
       Organisation: contact.organisation || '',
       PrimaryCategory: contact.primary_category || '',
-      SecondaryCategory: contact.secondary_category || '',
+      SecondaryCategories: (contact.secondary_categories || []).join('; '),
       ProspectingClient: contact.prospecting_client ? 'Yes' : 'No',
       LeadOwner: contact.lead_owner || '',
       SecondaryContacts: contact.secondary_contacts || '',
@@ -321,7 +348,7 @@ export default function ContactsPage() {
 
       const matchesSecondary =
         selectedSecondaryCategory === 'All' ||
-        contact.secondary_category === selectedSecondaryCategory
+        (contact.secondary_categories || []).includes(selectedSecondaryCategory)
 
       const matchesLeadOwner =
         selectedLeadOwner === 'All' ||
@@ -396,18 +423,6 @@ export default function ContactsPage() {
           >
             Contacts for events, polling, policy, media and political work.
           </h1>
-
-          <p
-            style={{
-              marginTop: '18px',
-              maxWidth: '700px',
-              color: 'rgba(255,255,255,0.86)',
-              fontSize: '18px',
-              lineHeight: 1.6,
-            }}
-          >
-            Search, filter, edit, delete, upload, and export the exact contact list you need.
-          </p>
         </div>
       </section>
 
@@ -480,7 +495,7 @@ export default function ContactsPage() {
 
                 <select
                   value={primaryCategory}
-                  onChange={(e) => setPrimaryCategory(e.target.value)}
+                  onChange={(e) => handlePrimaryCategoryChange(e.target.value)}
                   style={inputStyle}
                 >
                   <option value="">Select primary category</option>
@@ -491,18 +506,53 @@ export default function ContactsPage() {
                   ))}
                 </select>
 
-                <select
-                  value={secondaryCategory}
-                  onChange={(e) => setSecondaryCategory(e.target.value)}
-                  style={inputStyle}
+                <div
+                  style={{
+                    border: '1px solid #dbe4f0',
+                    borderRadius: '18px',
+                    padding: '16px',
+                    background: '#f8fbff',
+                  }}
                 >
-                  <option value="">Select secondary category</option>
-                  {CATEGORY_OPTIONS.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
+                  <p
+                    style={{
+                      marginTop: 0,
+                      marginBottom: '12px',
+                      fontWeight: 600,
+                      color: '#0b1f44',
+                    }}
+                  >
+                    Secondary categories
+                  </p>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                    {CATEGORY_OPTIONS.filter((category) => category !== primaryCategory).map(
+                      (category) => {
+                        const selected = secondaryCategories.includes(category)
+
+                        return (
+                          <button
+                            key={category}
+                            type="button"
+                            onClick={() => toggleSecondaryCategory(category)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: '999px',
+                              border: selected ? '1px solid #143b8f' : '1px solid #c9d7ea',
+                              background: selected ? '#143b8f' : 'white',
+                              color: selected ? 'white' : '#0b1f44',
+                              cursor: 'pointer',
+                              fontSize: '14px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {category}
+                          </button>
+                        )
+                      }
+                    )}
+                  </div>
+                </div>
 
                 <label style={checkboxRowStyle}>
                   <input
@@ -571,20 +621,6 @@ export default function ContactsPage() {
               boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
             }}
           >
-            <p
-              style={{
-                marginTop: 0,
-                marginBottom: '8px',
-                fontSize: '12px',
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: '#2563eb',
-                fontWeight: 700,
-              }}
-            >
-              Find contacts
-            </p>
-
             <input
               type="text"
               placeholder="Search name, email, phone, organisation, notes..."
@@ -642,18 +678,6 @@ export default function ContactsPage() {
               <option value="No">Prospecting client = No</option>
             </select>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: '14px',
-                marginBottom: '18px',
-              }}
-            >
-              <MetricCard label="Total contacts" value={String(contacts.length)} />
-              <MetricCard label="Filtered results" value={String(filteredContacts.length)} />
-            </div>
-
             <div style={{ display: 'grid', gap: '10px' }}>
               <button type="button" onClick={exportFilteredToExcel} style={primaryButtonStyle}>
                 Export filtered Excel
@@ -691,10 +715,6 @@ export default function ContactsPage() {
             boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
           }}
         >
-          <h2 style={{ margin: '0 0 18px', fontSize: '28px', color: '#0b1f44' }}>
-            Contact list
-          </h2>
-
           {filteredContacts.length === 0 ? (
             <div
               style={{
@@ -718,7 +738,14 @@ export default function ContactsPage() {
                     background: '#ffffff',
                   }}
                 >
-                  <strong style={{ display: 'block', fontSize: '18px', color: '#0b1f44', marginBottom: '6px' }}>
+                  <strong
+                    style={{
+                      display: 'block',
+                      fontSize: '18px',
+                      color: '#0b1f44',
+                      marginBottom: '6px',
+                    }}
+                  >
                     {contact.first_name || ''} {contact.last_name || ''}
                   </strong>
                   <div style={{ color: '#475569' }}>{contact.email || 'No email'}</div>
@@ -728,10 +755,12 @@ export default function ContactsPage() {
                     <strong>Primary:</strong> {contact.primary_category || 'None'}
                   </div>
                   <div style={{ color: '#475569', marginBottom: '8px' }}>
-                    <strong>Secondary:</strong> {contact.secondary_category || 'None'}
+                    <strong>Secondary:</strong>{' '}
+                    {(contact.secondary_categories || []).join(', ') || 'None'}
                   </div>
                   <div style={{ color: '#475569', marginBottom: '8px' }}>
-                    <strong>Prospecting client:</strong> {contact.prospecting_client ? 'Yes' : 'No'}
+                    <strong>Prospecting client:</strong>{' '}
+                    {contact.prospecting_client ? 'Yes' : 'No'}
                   </div>
                   <div style={{ color: '#475569', marginBottom: '8px' }}>
                     <strong>Lead owner:</strong> {contact.lead_owner || 'None'}
@@ -756,11 +785,19 @@ export default function ContactsPage() {
                   )}
 
                   <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                    <button type="button" onClick={() => startEdit(contact)} style={secondaryButtonStyle}>
+                    <button
+                      type="button"
+                      onClick={() => startEdit(contact)}
+                      style={secondaryButtonStyle}
+                    >
                       Edit
                     </button>
 
-                    <button type="button" onClick={() => deleteContact(contact.id)} style={dangerButtonStyle}>
+                    <button
+                      type="button"
+                      onClick={() => deleteContact(contact.id)}
+                      style={dangerButtonStyle}
+                    >
                       Delete
                     </button>
                   </div>
@@ -771,41 +808,6 @@ export default function ContactsPage() {
         </div>
       </section>
     </main>
-  )
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        border: '1px solid #dbe4f0',
-        borderRadius: '18px',
-        padding: '16px',
-        background: '#f8fbff',
-      }}
-    >
-      <div
-        style={{
-          fontSize: '12px',
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          color: '#64748b',
-          marginBottom: '6px',
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: '28px',
-          fontWeight: 700,
-          color: '#0b1f44',
-          letterSpacing: '-0.03em',
-        }}
-      >
-        {value}
-      </div>
-    </div>
   )
 }
 
