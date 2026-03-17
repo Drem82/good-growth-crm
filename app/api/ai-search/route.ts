@@ -35,7 +35,7 @@ export async function POST(req: Request) {
         {
           role: 'developer',
           content:
-            'You convert CRM search requests into structured filters. Return only valid JSON that matches the schema exactly.',
+            'You convert CRM search requests into structured filters and return clean JSON.',
         },
         {
           role: 'user',
@@ -52,7 +52,10 @@ Rules:
 - If a field is not clearly requested, use null.
 - "Louisa's contacts" means lead_owner = "Louisa".
 - Put leftover free text into keyword.
-- Return a short human-readable answer too.
+- Be concise and helpful in the answer.
+- If results exist, summarise them (e.g. "Found 8 media contacts led by Louisa").
+- If no results, explain clearly and suggest what to try next.
+- RETURN ONLY JSON.
 
 User request:
 ${query}
@@ -68,28 +71,16 @@ ${query}
             type: 'object',
             additionalProperties: false,
             properties: {
-              answer: {
-                type: 'string',
-              },
+              answer: { type: 'string' },
               filters: {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  primary_category: {
-                    type: ['string', 'null'],
-                  },
-                  secondary_category: {
-                    type: ['string', 'null'],
-                  },
-                  lead_owner: {
-                    type: ['string', 'null'],
-                  },
-                  prospecting_client: {
-                    type: ['boolean', 'null'],
-                  },
-                  keyword: {
-                    type: ['string', 'null'],
-                  },
+                  primary_category: { type: ['string', 'null'] },
+                  secondary_category: { type: ['string', 'null'] },
+                  lead_owner: { type: ['string', 'null'] },
+                  prospecting_client: { type: ['boolean', 'null'] },
+                  keyword: { type: ['string', 'null'] },
                 },
                 required: [
                   'primary_category',
@@ -112,7 +103,21 @@ ${query}
       return Response.json({ error: 'No AI response content' }, { status: 500 })
     }
 
-    const parsed: AIResult = JSON.parse(content)
+    let parsed: AIResult
+
+    try {
+      parsed = JSON.parse(content)
+    } catch (err) {
+      console.error('JSON PARSE ERROR:', content)
+      return Response.json(
+        { error: 'AI returned invalid JSON', raw: content },
+        { status: 500 }
+      )
+    }
+
+    // ------------------------
+    // DATABASE QUERY
+    // ------------------------
 
     let dbQuery = supabase
       .from('contacts')
@@ -150,6 +155,10 @@ ${query}
 
     let results = data || []
 
+    // ------------------------
+    // KEYWORD FILTER (LOCAL)
+    // ------------------------
+
     if (parsed.filters.keyword) {
       const keyword = parsed.filters.keyword.toLowerCase()
 
@@ -169,12 +178,18 @@ ${query}
       })
     }
 
+    // ------------------------
+    // FINAL RESPONSE
+    // ------------------------
+
     return Response.json({
       answer: parsed.answer,
       filters: parsed.filters,
       results,
     })
   } catch (error) {
+    console.error('SERVER ERROR:', error)
+
     return Response.json(
       { error: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
