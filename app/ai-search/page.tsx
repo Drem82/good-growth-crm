@@ -7,6 +7,7 @@ type Contact = {
   first_name: string | null
   last_name: string | null
   email: string | null
+  email_2?: string | null
   phone: string | null
   organisation: string | null
   job_role: string | null
@@ -14,13 +15,13 @@ type Contact = {
   secondary_categories: string[] | null
   prospecting_client: boolean | null
   lead_owner: string | null
-  secondary_contacts: string | null
-  other_contacts: string | null
   notes: string | null
+  topic_areas?: string | null
+  _score?: number
 }
 
 type AIResponse = {
-  action?: 'search' | 'create_contact'
+  action?: 'search' | 'create_contact' | 'recommend_contacts'
   answer?: string
   results?: Contact[]
   contact?: Contact | null
@@ -33,6 +34,7 @@ export default function AISearchPage() {
   const [answer, setAnswer] = useState('')
   const [results, setResults] = useState<Contact[]>([])
   const [contactPreview, setContactPreview] = useState<Contact | null>(null)
+  const [actionType, setActionType] = useState<string>('')
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault()
@@ -40,6 +42,7 @@ export default function AISearchPage() {
     setAnswer('')
     setResults([])
     setContactPreview(null)
+    setActionType('')
 
     try {
       const res = await fetch('/api/ai-search', {
@@ -55,6 +58,7 @@ export default function AISearchPage() {
         return
       }
 
+      setActionType(data.action || '')
       setAnswer(data.answer || '')
       setResults(data.results || [])
       setContactPreview(data.contact || null)
@@ -62,6 +66,34 @@ export default function AISearchPage() {
       alert('Could not run AI search')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function confirmAddContact() {
+    if (!contactPreview) return
+
+    const confirmed = window.confirm('Add this contact?')
+    if (!confirmed) return
+
+    try {
+      const res = await fetch('/api/add-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(contactPreview),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        alert(data.error || 'Failed to add contact')
+        return
+      }
+
+      alert('Contact added ✅')
+      setContactPreview(null)
+      setQuery('')
+    } catch {
+      alert('Error adding contact')
     }
   }
 
@@ -96,7 +128,7 @@ export default function AISearchPage() {
           <textarea
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Example: show me Louisa's polling contacts who are prospecting clients"
+            placeholder="Example: Give me a list of journalists that we should share our welfare policy press release with"
             style={{
               width: '100%',
               minHeight: '120px',
@@ -124,6 +156,19 @@ export default function AISearchPage() {
             {loading ? 'Searching...' : 'Ask the CRM'}
           </button>
         </form>
+
+        {actionType && (
+          <div
+            style={{
+              marginBottom: '16px',
+              color: '#475569',
+              fontSize: '14px',
+              textTransform: 'capitalize',
+            }}
+          >
+            Mode: {actionType.replace('_', ' ')}
+          </div>
+        )}
 
         {answer && (
           <div
@@ -156,49 +201,7 @@ export default function AISearchPage() {
             </p>
 
             <div style={{ display: 'grid', gap: '8px', color: '#334155' }}>
-             <button
-  onClick={async () => {
-    if (!contactPreview) return
-
-    const confirmed = window.confirm('Add this contact?')
-    if (!confirmed) return
-
-    try {
-      const res = await fetch('/api/add-contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(contactPreview),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        alert(data.error || 'Failed to add contact')
-        return
-      }
-
-      alert('Contact added ✅')
-
-      setContactPreview(null)
-      setQuery('')
-    } catch {
-      alert('Error adding contact')
-    }
-  }}
-  style={{
-    marginTop: '16px',
-    padding: '12px 16px',
-    border: 'none',
-    borderRadius: '12px',
-    background: '#16a34a',
-    color: 'white',
-    cursor: 'pointer',
-    fontWeight: 600,
-  }}
->
-  Confirm add contact
-</button>
- <div>
+              <div>
                 <strong>Name:</strong> {contactPreview.first_name || ''} {contactPreview.last_name || ''}
               </div>
               <div>
@@ -228,15 +231,28 @@ export default function AISearchPage() {
                 {contactPreview.prospecting_client ? 'Yes' : 'No'}
               </div>
               <div>
-                <strong>Secondary contacts:</strong> {contactPreview.secondary_contacts || 'None'}
-              </div>
-              <div>
-                <strong>Other contacts:</strong> {contactPreview.other_contacts || 'None'}
+                <strong>Topic areas:</strong> {contactPreview.topic_areas || 'None'}
               </div>
               <div>
                 <strong>Notes:</strong> {contactPreview.notes || 'None'}
               </div>
             </div>
+
+            <button
+              onClick={confirmAddContact}
+              style={{
+                marginTop: '16px',
+                padding: '12px 16px',
+                border: 'none',
+                borderRadius: '12px',
+                background: '#16a34a',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              Confirm add contact
+            </button>
           </div>
         )}
 
@@ -249,7 +265,9 @@ export default function AISearchPage() {
               padding: '18px',
             }}
           >
-            <h2 style={{ marginTop: 0, color: '#0b1f44' }}>Results</h2>
+            <h2 style={{ marginTop: 0, color: '#0b1f44' }}>
+              {actionType === 'recommend_contacts' ? 'Recommended contacts' : 'Results'}
+            </h2>
 
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '14px' }}>
               {results.map((contact) => (
@@ -273,6 +291,13 @@ export default function AISearchPage() {
                   </div>
                   <div>Lead owner: {contact.lead_owner || 'None'}</div>
                   <div>Prospecting client: {contact.prospecting_client ? 'Yes' : 'No'}</div>
+                  <div>Topic areas: {contact.topic_areas || 'None'}</div>
+                  {typeof contact._score === 'number' && (
+                    <div>Relevance score: {contact._score}</div>
+                  )}
+                  <div style={{ marginTop: '8px', color: '#475569' }}>
+                    Notes: {contact.notes || 'None'}
+                  </div>
                 </li>
               ))}
             </ul>
