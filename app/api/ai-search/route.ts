@@ -11,6 +11,7 @@ const supabase = createClient(
 )
 
 type AIResult = {
+  action: 'search' | 'create_contact'
   answer: string
   filters: {
     primary_category: string | null
@@ -19,6 +20,21 @@ type AIResult = {
     prospecting_client: boolean | null
     keyword: string | null
   }
+  contact: {
+    first_name: string | null
+    last_name: string | null
+    email: string | null
+    phone: string | null
+    organisation: string | null
+    job_role: string | null
+    primary_category: string | null
+    secondary_categories: string[]
+    prospecting_client: boolean | null
+    lead_owner: string | null
+    secondary_contacts: string | null
+    other_contacts: string | null
+    notes: string | null
+  } | null
 }
 
 export async function POST(req: Request) {
@@ -35,12 +51,14 @@ export async function POST(req: Request) {
         {
           role: 'developer',
           content:
-            'You convert CRM search requests into structured filters and return clean JSON.',
+            'You are a CRM assistant. You either search contacts or prepare a new contact to be added. Return only valid JSON matching the schema exactly.',
         },
         {
           role: 'user',
           content: `
-Convert this CRM request into filters.
+Convert this CRM request into either:
+1. a search request
+2. a create_contact preview
 
 Allowed primary/secondary categories:
 Events, Polling, Policy, Media, Political
@@ -49,12 +67,14 @@ Allowed lead owners:
 Praful, Louisa, Jade, Kai, Ben, Dylan, Billie
 
 Rules:
+- If the user is asking to add or create a contact, set action = "create_contact".
+- If the user is asking to find, search, show, or look up contacts, set action = "search".
 - If a field is not clearly requested, use null.
 - "Louisa's contacts" means lead_owner = "Louisa".
 - Put leftover free text into keyword.
 - Be concise and helpful in the answer.
-- If results exist, summarise them (e.g. "Found 8 media contacts led by Louisa").
-- If no results, explain clearly and suggest what to try next.
+- For create_contact, fill contact with the best structured version of the user request.
+- For search, set contact = null.
 - RETURN ONLY JSON.
 
 User request:
@@ -65,13 +85,19 @@ ${query}
       response_format: {
         type: 'json_schema',
         json_schema: {
-          name: 'crm_search_filters',
+          name: 'crm_ai_action',
           strict: true,
           schema: {
             type: 'object',
             additionalProperties: false,
             properties: {
-              answer: { type: 'string' },
+              action: {
+                type: 'string',
+                enum: ['search', 'create_contact'],
+              },
+              answer: {
+                type: 'string',
+              },
               filters: {
                 type: 'object',
                 additionalProperties: false,
@@ -90,8 +116,45 @@ ${query}
                   'keyword',
                 ],
               },
+              contact: {
+                type: ['object', 'null'],
+                additionalProperties: false,
+                properties: {
+                  first_name: { type: ['string', 'null'] },
+                  last_name: { type: ['string', 'null'] },
+                  email: { type: ['string', 'null'] },
+                  phone: { type: ['string', 'null'] },
+                  organisation: { type: ['string', 'null'] },
+                  job_role: { type: ['string', 'null'] },
+                  primary_category: { type: ['string', 'null'] },
+                  secondary_categories: {
+                    type: 'array',
+                    items: { type: 'string' },
+                  },
+                  prospecting_client: { type: ['boolean', 'null'] },
+                  lead_owner: { type: ['string', 'null'] },
+                  secondary_contacts: { type: ['string', 'null'] },
+                  other_contacts: { type: ['string', 'null'] },
+                  notes: { type: ['string', 'null'] },
+                },
+                required: [
+                  'first_name',
+                  'last_name',
+                  'email',
+                  'phone',
+                  'organisation',
+                  'job_role',
+                  'primary_category',
+                  'secondary_categories',
+                  'prospecting_client',
+                  'lead_owner',
+                  'secondary_contacts',
+                  'other_contacts',
+                  'notes',
+                ],
+              },
             },
-            required: ['answer', 'filters'],
+            required: ['action', 'answer', 'filters', 'contact'],
           },
         },
       },
@@ -107,17 +170,21 @@ ${query}
 
     try {
       parsed = JSON.parse(content)
-    } catch (err) {
-      console.error('JSON PARSE ERROR:', content)
+    } catch {
       return Response.json(
         { error: 'AI returned invalid JSON', raw: content },
         { status: 500 }
       )
     }
 
-    // ------------------------
-    // DATABASE QUERY
-    // ------------------------
+    if (parsed.action === 'create_contact') {
+      return Response.json({
+        action: parsed.action,
+        answer: parsed.answer,
+        contact: parsed.contact,
+        results: [],
+      })
+    }
 
     let dbQuery = supabase
       .from('contacts')
@@ -155,10 +222,6 @@ ${query}
 
     let results = data || []
 
-    // ------------------------
-    // KEYWORD FILTER (LOCAL)
-    // ------------------------
-
     if (parsed.filters.keyword) {
       const keyword = parsed.filters.keyword.toLowerCase()
 
@@ -178,14 +241,12 @@ ${query}
       })
     }
 
-    // ------------------------
-    // FINAL RESPONSE
-    // ------------------------
-
     return Response.json({
+      action: parsed.action,
       answer: parsed.answer,
       filters: parsed.filters,
       results,
+      contact: null,
     })
   } catch (error) {
     console.error('SERVER ERROR:', error)
